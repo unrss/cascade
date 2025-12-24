@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
+
 	"github.com/unrss/cascade/internal/allow"
 	"github.com/unrss/cascade/internal/env"
 	"github.com/unrss/cascade/internal/envrc"
@@ -216,7 +216,7 @@ func runExport(cmd *cobra.Command, sh shell.Shell, stdlib string, noCache bool) 
 	export.Set("CASCADE_FILE", lastRC.Path)
 
 	// Build watch list: all .envrc files plus extra watches
-	var watchPaths []string
+	watchPaths := make([]string, 0, len(allowed)+len(allExtraWatches))
 	for _, rc := range allowed {
 		watchPaths = append(watchPaths, rc.Path)
 	}
@@ -261,28 +261,4 @@ func handleNoEnvrc(stdout interface{ Write([]byte) (int, error) }, sh shell.Shel
 
 	fmt.Fprint(stdout, sh.Export(export))
 	return nil
-}
-
-// deepestDir returns the deepest directory from a list of RCs.
-func deepestDir(rcs []*envrc.RC) string {
-	if len(rcs) == 0 {
-		return ""
-	}
-
-	deepest := rcs[0].Dir
-	for _, rc := range rcs[1:] {
-		if len(rc.Dir) > len(deepest) {
-			deepest = rc.Dir
-		}
-	}
-	return deepest
-}
-
-// relPath returns a relative path from home, or the absolute path if not under home.
-func relPath(path, home string) string {
-	rel, err := filepath.Rel(home, path)
-	if err != nil {
-		return path
-	}
-	return rel
 }

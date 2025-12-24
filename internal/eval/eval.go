@@ -100,7 +100,7 @@ func (e *Evaluator) Evaluate(rc *envrc.RC, inputEnv env.Env) (*Result, error) {
 	// Build bash command: eval stdlib then call __main__
 	script := fmt.Sprintf(`eval "$CASCADE_STDLIB" && __main__ %q`, rc.Path)
 
-	cmd := exec.Command(e.bashPath, "-c", script)
+	cmd := exec.Command(e.bashPath, "-c", script) //nolint:gosec // intentional shell evaluation
 
 	// Set up environment
 	cmd.Env = inputEnv.ToGoEnv()

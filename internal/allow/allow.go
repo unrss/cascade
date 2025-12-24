@@ -304,7 +304,7 @@ func (s *Store) ListTrustedSubtrees() ([]string, error) {
 		return nil, fmt.Errorf("read trust directory: %w", err)
 	}
 
-	var paths []string
+	paths := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue

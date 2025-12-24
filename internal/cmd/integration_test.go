@@ -25,8 +25,10 @@ func buildTestBinary(t *testing.T) string {
 	t.Helper()
 
 	testBinaryOnce.Do(func() {
-		// Create a temp directory for the binary
-		tmpDir, err := os.MkdirTemp("", "cascade-test-*")
+		// Create a temp directory for the binary.
+		// Note: Can't use t.TempDir() here because this runs in sync.Once
+		// and the directory must persist across all tests.
+		tmpDir, err := os.MkdirTemp("", "cascade-test-*") //nolint:usetesting // sync.Once requires persistent dir
 		if err != nil {
 			testBinaryErr = err
 			return
@@ -57,15 +59,6 @@ type buildError struct {
 
 func (e *buildError) Error() string {
 	return string(e.output) + ": " + e.err.Error()
-}
-
-func mustGetwd(t *testing.T) string {
-	t.Helper()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	return wd
 }
 
 // testEnv holds the test environment configuration.
@@ -145,7 +138,7 @@ func (e *testEnv) withEnv(extra ...string) *testEnv {
 func (e *testEnv) run(args ...string) (stdout, stderr string, err error) {
 	e.t.Helper()
 
-	cmd := exec.Command(e.binary, args...)
+	cmd := exec.Command(e.binary, args...) //nolint:gosec // intentional CLI test harness
 	cmd.Dir = e.workDir
 	cmd.Env = e.baseEnv
 

@@ -61,7 +61,7 @@ func TestCache_Clear(t *testing.T) {
 	}
 
 	// Add some entries
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		key := "key-" + string(rune('a'+i))
 		if err := cache.Set(key, &Result{Env: env.Env{"N": string(rune('0' + i))}}, "/test"); err != nil {
 			t.Fatalf("Set: %v", err)

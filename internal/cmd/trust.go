@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 
 	"github.com/spf13/cobra"
+
 	"github.com/unrss/cascade/internal/allow"
 )
 
@@ -53,7 +55,7 @@ Examples:
 
 func runTrustAdd(cmd *cobra.Command, args []string, store *allow.Store) error {
 	if len(args) == 0 {
-		return fmt.Errorf("path required")
+		return errors.New("path required")
 	}
 
 	path := args[0]
@@ -72,7 +74,7 @@ func runTrustAdd(cmd *cobra.Command, args []string, store *allow.Store) error {
 
 func runTrustRemove(cmd *cobra.Command, args []string, store *allow.Store) error {
 	if len(args) == 0 {
-		return fmt.Errorf("path required")
+		return errors.New("path required")
 	}
 
 	path := args[0]

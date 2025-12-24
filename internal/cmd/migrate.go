@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
 	"github.com/unrss/cascade/internal/allow"
 	"github.com/unrss/cascade/internal/envrc"
 )
@@ -74,7 +76,7 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 	// Find direnv data directory
 	direnvDataDir := findDirenvDataDir()
 	if direnvDataDir == "" {
-		return fmt.Errorf("direnv data directory not found (checked $XDG_DATA_HOME/direnv and ~/.local/share/direnv)")
+		return errors.New("direnv data directory not found (checked $XDG_DATA_HOME/direnv and ~/.local/share/direnv)")
 	}
 
 	fmt.Fprintln(out, "Cascade Migration Report")
@@ -106,7 +108,7 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Process each allowed file
-	var results []migrationResult
+	results := make([]migrationResult, 0, len(allowedPaths))
 	var warnings []compatibilityWarning
 
 	for _, path := range allowedPaths {
