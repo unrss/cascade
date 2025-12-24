@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+
 	"github.com/unrss/cascade/internal/allow"
 	"github.com/unrss/cascade/internal/envrc"
 )

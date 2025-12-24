@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
 	"github.com/unrss/cascade/internal/allow"
 	"github.com/unrss/cascade/internal/env"
 	"github.com/unrss/cascade/internal/envrc"

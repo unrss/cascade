@@ -9,10 +9,11 @@ import (
 	"sort"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
 	"github.com/unrss/cascade/internal/allow"
 	"github.com/unrss/cascade/internal/env"
 	"github.com/unrss/cascade/internal/envrc"
-	"golang.org/x/term"
 )
 
 // StatusOutput is the JSON representation of cascade status.
