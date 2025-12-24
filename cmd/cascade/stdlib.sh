@@ -236,7 +236,7 @@ source_env() {
     # Check if the target .envrc is allowed
     # CASCADE_BIN must be set by Go before spawning
     if [[ -n "${CASCADE_BIN:-}" ]]; then
-        if ! "$CASCADE_BIN" status "$envrc_file" >/dev/null 2>&1; then
+        if ! "$CASCADE_BIN" check --silent "$envrc_file"; then
             log_error "source_env: $envrc_file is not allowed (run: cascade allow $envrc_file)"
             return 1
         fi
@@ -349,6 +349,13 @@ source_env_if_exists() {
     fi
 
     if [[ -f "$file" ]]; then
+        # Security check: only source allowed .envrc files
+        if [[ -n "${CASCADE_BIN:-}" ]]; then
+            if ! "$CASCADE_BIN" check --silent "$file"; then
+                log_error "source_env_if_exists: $file is not allowed (run: cascade allow $file)"
+                return 1
+            fi
+        fi
         # shellcheck source=/dev/null
         source "$file"
     fi
