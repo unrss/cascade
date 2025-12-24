@@ -386,12 +386,7 @@ func TestIntegration_DeniedFile(t *testing.T) {
 }
 
 // TestIntegration_SourceEnvSibling tests source_env with sibling directories.
-// TODO: This test is skipped because source_env in stdlib.sh uses "cascade status <file>"
-// which doesn't work - the status command doesn't accept file arguments.
-// This needs a fix in stdlib.sh or a new "cascade check <file>" command.
 func TestIntegration_SourceEnvSibling(t *testing.T) {
-	t.Skip("source_env requires stdlib.sh fix - status command doesn't accept file arguments")
-
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
@@ -426,6 +421,122 @@ export PROJECT="project_value"`)
 	// Both shared and project vars should be set
 	assertExportContains(t, exports, "SHARED", "shared_value")
 	assertExportContains(t, exports, "PROJECT", "project_value")
+}
+
+// TestIntegration_SourceEnv_NotAllowed tests that source_env refuses to source
+// a sibling .envrc that is not allowed.
+func TestIntegration_SourceEnv_NotAllowed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	env := setupTestEnv(t)
+
+	// Create sibling directory structure
+	sharedDir := filepath.Join(env.homeDir, "shared")
+	projectDir := filepath.Join(env.homeDir, "project")
+
+	env.createEnvrc(sharedDir, `export SHARED="shared_value"`)
+	env.createEnvrc(projectDir, `source_env ../shared
+export PROJECT="project_value"`)
+
+	// Allow ONLY project, NOT shared
+	if err := env.runAllow(filepath.Join(projectDir, ".envrc")); err != nil {
+		t.Fatalf("allow project: %v", err)
+	}
+	// Note: shared is NOT allowed
+
+	// Run export from project directory
+	projectEnv := env.withWorkDir(projectDir)
+	stdout, stderr, _ := projectEnv.runExport()
+
+	exports := parseExport(stdout)
+
+	// SHARED should NOT be present (not allowed)
+	assertExportNotContains(t, exports, "SHARED")
+
+	// Should see error about shared not being allowed
+	assertStderrContains(t, stderr, "not allowed")
+}
+
+// TestIntegration_SourceEnv_Denied tests that source_env refuses to source
+// a sibling .envrc that is explicitly denied.
+func TestIntegration_SourceEnv_Denied(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	env := setupTestEnv(t)
+
+	// Create sibling directory structure
+	sharedDir := filepath.Join(env.homeDir, "shared")
+	projectDir := filepath.Join(env.homeDir, "project")
+
+	env.createEnvrc(sharedDir, `export SHARED="shared_value"`)
+	env.createEnvrc(projectDir, `source_env ../shared
+export PROJECT="project_value"`)
+
+	// Allow project, DENY shared
+	if err := env.runAllow(filepath.Join(projectDir, ".envrc")); err != nil {
+		t.Fatalf("allow project: %v", err)
+	}
+	if err := env.runDeny(filepath.Join(sharedDir, ".envrc")); err != nil {
+		t.Fatalf("deny shared: %v", err)
+	}
+
+	// Run export from project directory
+	projectEnv := env.withWorkDir(projectDir)
+	stdout, stderr, _ := projectEnv.runExport()
+
+	exports := parseExport(stdout)
+
+	// SHARED should NOT be present (denied)
+	assertExportNotContains(t, exports, "SHARED")
+
+	// Should see error about shared not being allowed
+	assertStderrContains(t, stderr, "not allowed")
+}
+
+// TestIntegration_SourceEnvIfExists_NotAllowed tests that source_env_if_exists
+// also respects allow/deny settings.
+func TestIntegration_SourceEnvIfExists_NotAllowed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	env := setupTestEnv(t)
+
+	// Create directory structure with a private env file
+	projectDir := filepath.Join(env.homeDir, "project")
+	env.createDir(projectDir)
+
+	// Create a .envrc.local file (like a private override)
+	localEnvPath := filepath.Join(projectDir, ".envrc.local")
+	if err := os.WriteFile(localEnvPath, []byte(`export LOCAL_SECRET="secret_value"`), 0644); err != nil {
+		t.Fatalf("write .envrc.local: %v", err)
+	}
+
+	// Create main .envrc that sources the local file
+	env.createEnvrc(projectDir, `source_env_if_exists .envrc.local
+export PROJECT="project_value"`)
+
+	// Allow ONLY the main .envrc, NOT the .envrc.local
+	if err := env.runAllow(filepath.Join(projectDir, ".envrc")); err != nil {
+		t.Fatalf("allow project: %v", err)
+	}
+	// Note: .envrc.local is NOT allowed
+
+	// Run export from project directory
+	projectEnv := env.withWorkDir(projectDir)
+	stdout, stderr, _ := projectEnv.runExport()
+
+	exports := parseExport(stdout)
+
+	// LOCAL_SECRET should NOT be present (not allowed)
+	assertExportNotContains(t, exports, "LOCAL_SECRET")
+
+	// Should see error about .envrc.local not being allowed
+	assertStderrContains(t, stderr, "not allowed")
 }
 
 // TestIntegration_PathAdd tests PATH_add functionality.
@@ -834,5 +945,71 @@ func TestIntegration_VersionCommand(t *testing.T) {
 	// Should output something (version string)
 	if len(strings.TrimSpace(stdout)) == 0 {
 		t.Error("version output is empty")
+	}
+}
+
+// TestIntegration_CheckCommand tests the check command for all statuses.
+func TestIntegration_CheckCommand(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	env := setupTestEnv(t)
+
+	// Create .envrc
+	envrcPath := filepath.Join(env.homeDir, ".envrc")
+	env.createEnvrc(env.homeDir, `export TEST_VAR="test_value"`)
+
+	// Test 1: Check before allow - should be "not allowed" with exit code 1
+	stdout, _, err := env.run("check", envrcPath)
+	if err == nil {
+		t.Error("check should fail for not-allowed file")
+	}
+	if !strings.Contains(stdout, "not allowed") {
+		t.Errorf("stdout = %q, want to contain 'not allowed'", stdout)
+	}
+
+	// Test 2: Check with --silent flag - should have no output
+	stdout, _, err = env.run("check", "--silent", envrcPath)
+	if err == nil {
+		t.Error("check --silent should fail for not-allowed file")
+	}
+	if stdout != "" {
+		t.Errorf("check --silent stdout = %q, want empty", stdout)
+	}
+
+	// Test 3: Allow the file, then check - should be "allowed" with exit code 0
+	if err := env.runAllow(envrcPath); err != nil {
+		t.Fatalf("allow: %v", err)
+	}
+
+	stdout, _, err = env.run("check", envrcPath)
+	if err != nil {
+		t.Errorf("check should succeed for allowed file: %v", err)
+	}
+	if !strings.Contains(stdout, "allowed") {
+		t.Errorf("stdout = %q, want to contain 'allowed'", stdout)
+	}
+
+	// Test 4: Check with --silent flag for allowed file - should have no output, exit 0
+	stdout, _, err = env.run("check", "--silent", envrcPath)
+	if err != nil {
+		t.Errorf("check --silent should succeed for allowed file: %v", err)
+	}
+	if stdout != "" {
+		t.Errorf("check --silent stdout = %q, want empty", stdout)
+	}
+
+	// Test 5: Deny the file, then check - should be "denied" with exit code 1
+	if err := env.runDeny(envrcPath); err != nil {
+		t.Fatalf("deny: %v", err)
+	}
+
+	stdout, _, err = env.run("check", envrcPath)
+	if err == nil {
+		t.Error("check should fail for denied file")
+	}
+	if !strings.Contains(stdout, "denied") {
+		t.Errorf("stdout = %q, want to contain 'denied'", stdout)
 	}
 }
