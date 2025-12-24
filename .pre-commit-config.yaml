@@ -1,43 +1,63 @@
 repos:
-  # golangci-lint official hooks
+  # General file hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+      - id: check-merge-conflict
+
+  # YAML linting
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.37.1
+    hooks:
+      - id: yamllint
+        args: [-c, .yamllint.yaml]
+
+  # Go linting via golangci-lint
   - repo: https://github.com/golangci/golangci-lint
-    rev: v2.3.0
+    rev: v2.7.2
     hooks:
       - id: golangci-lint
-        name: golangci-lint
         args: [--timeout=5m]
       - id: golangci-lint-fmt
-        name: golangci-lint fmt
 
-  # Go module maintenance
-  - repo: https://github.com/dnephin/pre-commit-golang
-    rev: v0.5.1
-    hooks:
-      - id: go-mod-tidy
-
-  # Go build and test
+  # Go module tidiness check
   - repo: local
     hooks:
-      - id: go-build
-        name: go build
-        entry: go build -o /dev/null ./cmd/cascade
+      - id: go-mod-tidy
+        name: go mod tidy
+        entry: go mod tidy -diff
         language: system
         pass_filenames: false
-        types: [go]
+        files: \.go$
+
+      - id: govulncheck
+        name: govulncheck
+        entry: govulncheck ./...
+        language: system
+        pass_filenames: false
+        files: \.go$
+
+      - id: go-build
+        name: go build
+        entry: go build ./...
+        language: system
+        pass_filenames: false
+        files: \.go$
+
       - id: go-test
         name: go test
         entry: go test -race -short ./...
         language: system
         pass_filenames: false
-        types: [go]
+        files: \.go$
 
-  # General file hygiene
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+  # Commit message linting
+  - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
+    rev: v9.23.0
     hooks:
-      - id: trailing-whitespace
-        args: [--markdown-linebreak-ext=md]
-      - id: end-of-file-fixer
-      - id: check-yaml
-      - id: check-added-large-files
-        args: [--maxkb=500]
+      - id: commitlint
+        stages: [commit-msg]
+        additional_dependencies: ["@commitlint/config-conventional"]

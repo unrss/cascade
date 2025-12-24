@@ -1,0 +1,25 @@
+# Commit message linting rules
+# Style: Capital verb, 50 chars max, no period (e.g., "Add profile preferences handler")
+extends:
+  - "@commitlint/config-conventional"
+
+rules:
+  # Disable conventional commit type/scope requirements
+  # (allows "Add feature" instead of "feat: add feature")
+  type-empty: [0]
+  type-enum: [0]
+  type-case: [0]
+  scope-empty: [0]
+  scope-case: [0]
+  subject-empty: [0]
+  subject-case: [0]
+  # No period at end of header
+  subject-full-stop: [2, never, "."]
+  # 50 char max header line
+  header-max-length: [2, always, 50]
+  # Body rules (optional body, blank line required if present)
+  body-leading-blank: [2, always]
+  body-max-line-length: [0]
+  # Footer rules
+  footer-leading-blank: [2, always]
+  footer-max-line-length: [0]
