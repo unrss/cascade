@@ -260,6 +260,19 @@ func assertExportNotContains(t *testing.T, exports map[string]string, key string
 	}
 }
 
+// assertExportUnsets checks that the export output unsets the key (empty string value).
+func assertExportUnsets(t *testing.T, exports map[string]string, key string) {
+	t.Helper()
+	got, ok := exports[key]
+	if !ok {
+		t.Errorf("export does not contain unset for %s", key)
+		return
+	}
+	if got != "" {
+		t.Errorf("export %s = %q, want unset (empty)", key, got)
+	}
+}
+
 // assertStderrContains checks that stderr contains the expected substring.
 func assertStderrContains(t *testing.T, stderr, want string) {
 	t.Helper()
@@ -377,12 +390,13 @@ func TestIntegration_DeniedFile(t *testing.T) {
 		t.Fatalf("deny: %v", err)
 	}
 
-	// Export should show error and not apply
+	// Export should show error and revert the previously set variable
 	stdout, stderr, _ := env.runExport()
 	assertStderrContains(t, stderr, "blocked")
 
 	exports = parseExport(stdout)
-	assertExportNotContains(t, exports, "TEST_VAR")
+	// When a file is denied, cascade should unset variables it previously set
+	assertExportUnsets(t, exports, "TEST_VAR")
 }
 
 // TestIntegration_SourceEnvSibling tests source_env with sibling directories.

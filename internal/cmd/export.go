@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -11,6 +12,7 @@ import (
 	"github.com/unrss/cascade/internal/envrc"
 	"github.com/unrss/cascade/internal/eval"
 	"github.com/unrss/cascade/internal/shell"
+	"github.com/unrss/cascade/internal/state"
 )
 
 func newExportCmd(stdlib string) *cobra.Command {
@@ -85,7 +87,7 @@ func runExport(cmd *cobra.Command, sh shell.Shell, stdlib string, noCache bool) 
 
 	// If no .envrc files and we have previous state, revert
 	if len(existing) == 0 {
-		return handleNoEnvrc(stdout, sh, prevDiff)
+		return handleNoEnvrc(stdout, stderr, sh, prevDiff, nil, nil)
 	}
 
 	// Create allow store
@@ -112,10 +114,15 @@ func runExport(cmd *cobra.Command, sh shell.Shell, stdlib string, noCache bool) 
 
 	// If any denied, print error and revert
 	if len(denied) > 0 {
-		for _, rc := range denied {
+		// Create state store for potential recovery
+		stateStore, _ := state.NewStore() // Ignore error - best effort
+
+		deniedPaths := make([]string, len(denied))
+		for i, rc := range denied {
 			fmt.Fprintf(stderr, "cascade: error: %s is blocked. Run `cascade allow %s` to unblock.\n", rc.Path, rc.Path)
+			deniedPaths[i] = rc.Path
 		}
-		return handleNoEnvrc(stdout, sh, prevDiff)
+		return handleNoEnvrc(stdout, stderr, sh, prevDiff, stateStore, deniedPaths)
 	}
 
 	// If any not allowed, print warning and skip those
@@ -127,7 +134,7 @@ func runExport(cmd *cobra.Command, sh shell.Shell, stdlib string, noCache bool) 
 
 	// If no allowed files, revert
 	if len(allowed) == 0 {
-		return handleNoEnvrc(stdout, sh, prevDiff)
+		return handleNoEnvrc(stdout, stderr, sh, prevDiff, nil, nil)
 	}
 
 	// Get self path for evaluator
@@ -171,7 +178,7 @@ func runExport(cmd *cobra.Command, sh shell.Shell, stdlib string, noCache bool) 
 		if err != nil {
 			fmt.Fprintf(stderr, "cascade: error evaluating %s: %v\n", rc.Path, err)
 			// Continue with other files? For now, abort and revert
-			return handleNoEnvrc(stdout, sh, prevDiff)
+			return handleNoEnvrc(stdout, stderr, sh, prevDiff, nil, nil)
 		}
 		workingEnv = result.Env
 		allExtraWatches = append(allExtraWatches, result.ExtraWatches...)
@@ -230,21 +237,52 @@ func runExport(cmd *cobra.Command, sh shell.Shell, stdlib string, noCache bool) 
 
 	// Output shell commands
 	fmt.Fprint(stdout, sh.Export(export))
+
+	// Save state for future revert capability
+	stateStore, stateErr := state.NewStore()
+	if stateErr != nil {
+		fmt.Fprintf(stderr, "cascade: warning: state storage unavailable: %v\n", stateErr)
+	} else {
+		// Save state for the last evaluated .envrc (the leaf of the chain)
+		if saveErr := stateStore.Save(lastRC.Path, lastRC.ContentHash, newDiff); saveErr != nil {
+			fmt.Fprintf(stderr, "cascade: warning: failed to save state: %v\n", saveErr)
+		}
+	}
+
 	return nil
 }
 
 // handleNoEnvrc handles the case when no .envrc files apply.
 // If we have previous state, revert it. Otherwise, do nothing.
-func handleNoEnvrc(stdout interface{ Write([]byte) (int, error) }, sh shell.Shell, prevDiff *env.EnvDiff) error {
-	if prevDiff == nil || prevDiff.IsEmpty() {
-		// Nothing to do
-		return nil
+func handleNoEnvrc(stdout io.Writer, stderr io.Writer, sh shell.Shell, prevDiff *env.EnvDiff, stateStore *state.Store, deniedPaths []string) error {
+	// Try CASCADE_DIFF first
+	if prevDiff != nil && !prevDiff.IsEmpty() {
+		return revertAndCleanup(stdout, sh, prevDiff, stateStore, deniedPaths)
 	}
 
-	// Revert previous changes
+	// Fall back to persistent state for denied files
+	if stateStore != nil && len(deniedPaths) > 0 {
+		for _, path := range deniedPaths {
+			if savedState, err := stateStore.Load(path); err == nil && savedState != nil && savedState.Diff != nil {
+				return revertAndCleanup(stdout, sh, savedState.Diff, stateStore, deniedPaths)
+			}
+		}
+	}
+
+	// No state available - warn user if there are denied files
+	if len(deniedPaths) > 0 {
+		fmt.Fprintf(stderr, "cascade: warning: cannot determine variables set by denied files\n")
+		fmt.Fprintf(stderr, "cascade: warning: environment may contain stale variables. Consider restarting your shell.\n")
+	}
+
+	return nil
+}
+
+// revertAndCleanup reverts the diff and cleans up state files
+func revertAndCleanup(stdout io.Writer, sh shell.Shell, diff *env.EnvDiff, stateStore *state.Store, deniedPaths []string) error {
 	export := make(shell.ShellExport)
 
-	reversed := prevDiff.Reverse()
+	reversed := diff.Reverse()
 	for key, value := range reversed.Next {
 		if value == "" {
 			export.Unset(key)
@@ -260,5 +298,13 @@ func handleNoEnvrc(stdout interface{ Write([]byte) (int, error) }, sh shell.Shel
 	export.Unset("CASCADE_WATCHES")
 
 	fmt.Fprint(stdout, sh.Export(export))
+
+	// Clean up state files after successful revert
+	if stateStore != nil {
+		for _, path := range deniedPaths {
+			_ = stateStore.Delete(path)
+		}
+	}
+
 	return nil
 }
