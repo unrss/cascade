@@ -1027,3 +1027,150 @@ func TestIntegration_CheckCommand(t *testing.T) {
 		t.Errorf("stdout = %q, want to contain 'denied'", stdout)
 	}
 }
+
+// TestIntegration_StateRecovery_AfterCascadeDiffCleared tests that persistent state
+// is used to revert variables when CASCADE_DIFF is not available (new shell session).
+func TestIntegration_StateRecovery_AfterCascadeDiffCleared(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	te := setupTestEnv(t)
+
+	// Create and allow .envrc
+	te.createEnvrc(te.homeDir, `export TEST_VAR="test_value"`)
+	if err := te.runAllow(""); err != nil {
+		t.Fatalf("allow: %v", err)
+	}
+
+	// Run export to load the environment and save state to disk
+	stdout, stderr, err := te.runExport()
+	if err != nil {
+		t.Fatalf("export: %v\nstderr: %s", err, stderr)
+	}
+
+	exports := parseExport(stdout)
+	assertExportContains(t, exports, "TEST_VAR", "test_value")
+
+	// Verify CASCADE_DIFF was set (state is active)
+	if _, ok := exports["CASCADE_DIFF"]; !ok {
+		t.Fatal("CASCADE_DIFF not set after export")
+	}
+
+	// Now simulate a new shell session: CASCADE_DIFF is not set
+	// Deny the file
+	if err := te.runDeny(""); err != nil {
+		t.Fatalf("deny: %v", err)
+	}
+
+	// Run export again WITHOUT CASCADE_DIFF in environment
+	// The persistent state should be used to determine what to unset
+	stdout, stderr, _ = te.runExport()
+
+	exports = parseExport(stdout)
+
+	// TEST_VAR should be unset (recovered from persistent state)
+	assertExportUnsets(t, exports, "TEST_VAR")
+
+	// Should show blocked message
+	assertStderrContains(t, stderr, "blocked")
+}
+
+// TestIntegration_DenyWithoutPriorState_ShowsWarning tests that denying a file
+// that was never loaded shows a warning about stale variables.
+func TestIntegration_DenyWithoutPriorState_ShowsWarning(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	te := setupTestEnv(t)
+
+	// Create .envrc but never allow or load it
+	te.createEnvrc(te.homeDir, `export NEVER_LOADED="value"`)
+
+	// Deny it immediately (without ever allowing/loading)
+	if err := te.runDeny(""); err != nil {
+		t.Fatalf("deny: %v", err)
+	}
+
+	// Run export - should show warning about stale variables
+	_, stderr, _ := te.runExport()
+
+	// Should show blocked message
+	assertStderrContains(t, stderr, "blocked")
+
+	// Should show warning about stale variables since no state exists
+	assertStderrContains(t, stderr, "stale variables")
+}
+
+// TestIntegration_StateRecovery_ChainWithMixedStatus tests state recovery
+// when a chain has mixed allow/deny status after CASCADE_DIFF is cleared.
+// When ANY file in the chain is denied, the entire chain is reverted for security.
+func TestIntegration_StateRecovery_ChainWithMixedStatus(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	te := setupTestEnv(t)
+
+	// Create chain: home/.envrc (sets VAR1) and home/project/.envrc (sets VAR2)
+	projectDir := filepath.Join(te.homeDir, "project")
+	te.createEnvrc(te.homeDir, `export VAR1="from_home"`)
+	te.createEnvrc(projectDir, `export VAR2="from_project"`)
+
+	// Allow both files
+	if err := te.runAllow(filepath.Join(te.homeDir, ".envrc")); err != nil {
+		t.Fatalf("allow home: %v", err)
+	}
+	if err := te.runAllow(filepath.Join(projectDir, ".envrc")); err != nil {
+		t.Fatalf("allow project: %v", err)
+	}
+
+	// Run export from project directory to load both and save state
+	projectEnv := te.withWorkDir(projectDir)
+	stdout, stderr, err := projectEnv.runExport()
+	if err != nil {
+		t.Fatalf("export: %v\nstderr: %s", err, stderr)
+	}
+
+	exports := parseExport(stdout)
+	assertExportContains(t, exports, "VAR1", "from_home")
+	assertExportContains(t, exports, "VAR2", "from_project")
+
+	// Verify CASCADE_DIFF was set
+	cascadeDiff, ok := exports["CASCADE_DIFF"]
+	if !ok {
+		t.Fatal("CASCADE_DIFF not set after export")
+	}
+
+	// Now simulate: CASCADE_DIFF is cleared (new shell session)
+	// Deny the parent home/.envrc but keep project/.envrc allowed
+	if err := te.runDeny(filepath.Join(te.homeDir, ".envrc")); err != nil {
+		t.Fatalf("deny home: %v", err)
+	}
+
+	// Run export from project directory WITHOUT CASCADE_DIFF
+	// When any file in chain is denied, entire chain is reverted for security
+	stdout, stderr, _ = projectEnv.runExport()
+
+	// Should show blocked message for home
+	assertStderrContains(t, stderr, "blocked")
+
+	exports = parseExport(stdout)
+
+	// Both VAR1 and VAR2 should NOT be set - entire chain is reverted when any file is denied
+	// This is the expected security behavior: a denied file blocks the entire chain
+	assertExportNotContains(t, exports, "VAR1")
+	assertExportNotContains(t, exports, "VAR2")
+
+	// Now test with CASCADE_DIFF present (simulating same shell session)
+	// This should properly unset both variables
+	projectEnvWithDiff := projectEnv.withEnv("CASCADE_DIFF=" + cascadeDiff)
+	stdout, _, _ = projectEnvWithDiff.runExport()
+
+	exports = parseExport(stdout)
+
+	// Both VAR1 and VAR2 should be unset (reverted from CASCADE_DIFF)
+	assertExportUnsets(t, exports, "VAR1")
+	assertExportUnsets(t, exports, "VAR2")
+}
