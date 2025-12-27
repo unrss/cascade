@@ -234,6 +234,11 @@ func detectVariableChanges(before, after env.Env, showValues bool) []VarEntry {
 
 	// Check for new or modified variables
 	for key, newVal := range after {
+		// Skip ignored variables (CASCADE_*, PWD, SHLVL, _, etc.)
+		if env.IgnoredEnv(key) {
+			continue
+		}
+
 		oldVal, existed := before[key]
 
 		var entry VarEntry
@@ -261,6 +266,11 @@ func detectVariableChanges(before, after env.Env, showValues bool) []VarEntry {
 
 	// Check for unset variables
 	for key := range before {
+		// Skip ignored variables
+		if env.IgnoredEnv(key) {
+			continue
+		}
+
 		if _, exists := after[key]; !exists {
 			entry := VarEntry{
 				Name:   key,
