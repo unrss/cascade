@@ -49,23 +49,28 @@ func newTreeCmd(stdlib string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tree [VAR...]",
 		Short: "Show the cascade of .envrc files",
-		Long: `Display a tree view of .envrc files in the cascade chain from the
-cascade root (typically home directory) to the current directory.
+		Long: `Display a tree view of .envrc files in the cascade chain,
+showing which environment variables are set at each level.
 
-Shows the trust status of each .envrc file:
-  - allowed: file is trusted and will be evaluated
-  - denied: file is explicitly blocked
-  - not allowed: file exists but needs approval
+The tree shows each directory from the cascade root to the current
+directory, with the trust status of each .envrc file and the
+variables it sets.
 
-For allowed files, shows which environment variables are set or modified.
+Examples:
+  # Show the full cascade tree
+  cascade tree
 
-When variable names are provided as arguments, only those variables are shown
-and a final value summary is displayed at the end.`,
-		Example: `  cascade tree
-  cascade tree --json
+  # Show tree with variable values
   cascade tree --values
+
+  # Show only PATH variable across the cascade
   cascade tree PATH
-  cascade tree PATH GOPATH DATABASE_URL`,
+
+  # Show multiple variables with their values
+  cascade tree PATH GOPATH --values
+
+  # Output as JSON for scripting
+  cascade tree --json`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTree(cmd.OutOrStdout(), cmd.ErrOrStderr(), args, stdlib, jsonOutput, showValues)
