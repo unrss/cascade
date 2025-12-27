@@ -9,7 +9,6 @@ import (
 	"sort"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 
 	"github.com/unrss/cascade/internal/allow"
 	"github.com/unrss/cascade/internal/env"
@@ -39,55 +38,6 @@ type WatchEntry struct {
 	Exists  bool   `json:"exists"`
 	Changed bool   `json:"changed"`
 	Extra   bool   `json:"extra,omitempty"` // True if added via watch_file (not an .envrc)
-}
-
-// colorizer handles terminal color output.
-type colorizer struct {
-	enabled bool
-}
-
-func newColorizer(w io.Writer) *colorizer {
-	// Check if output is a terminal and NO_COLOR is not set
-	enabled := false
-	if f, ok := w.(*os.File); ok {
-		enabled = term.IsTerminal(int(f.Fd())) && os.Getenv("NO_COLOR") == ""
-	}
-	return &colorizer{enabled: enabled}
-}
-
-func (c *colorizer) green(s string) string {
-	if c.enabled {
-		return "\033[32m" + s + "\033[0m"
-	}
-	return s
-}
-
-func (c *colorizer) red(s string) string {
-	if c.enabled {
-		return "\033[31m" + s + "\033[0m"
-	}
-	return s
-}
-
-func (c *colorizer) yellow(s string) string {
-	if c.enabled {
-		return "\033[33m" + s + "\033[0m"
-	}
-	return s
-}
-
-func (c *colorizer) bold(s string) string {
-	if c.enabled {
-		return "\033[1m" + s + "\033[0m"
-	}
-	return s
-}
-
-func (c *colorizer) dim(s string) string {
-	if c.enabled {
-		return "\033[2m" + s + "\033[0m"
-	}
-	return s
 }
 
 func newStatusCmd() *cobra.Command {
