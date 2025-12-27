@@ -19,9 +19,10 @@ import (
 
 // TreeOutput is the JSON representation of cascade tree.
 type TreeOutput struct {
-	Root    string      `json:"root"`
-	Current string      `json:"current"`
-	Levels  []TreeLevel `json:"levels"`
+	Root        string            `json:"root"`
+	Current     string            `json:"current"`
+	Levels      []TreeLevel       `json:"levels"`
+	FinalValues map[string]string `json:"final_values,omitempty"`
 }
 
 // TreeLevel represents a single directory level in the cascade chain.
@@ -46,7 +47,7 @@ func newTreeCmd(stdlib string) *cobra.Command {
 	var showValues bool
 
 	cmd := &cobra.Command{
-		Use:   "tree",
+		Use:   "tree [VAR...]",
 		Short: "Show the cascade of .envrc files",
 		Long: `Display a tree view of .envrc files in the cascade chain from the
 cascade root (typically home directory) to the current directory.
@@ -56,13 +57,18 @@ Shows the trust status of each .envrc file:
   - denied: file is explicitly blocked
   - not allowed: file exists but needs approval
 
-For allowed files, shows which environment variables are set or modified.`,
+For allowed files, shows which environment variables are set or modified.
+
+When variable names are provided as arguments, only those variables are shown
+and a final value summary is displayed at the end.`,
 		Example: `  cascade tree
   cascade tree --json
-  cascade tree --values`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runTree(cmd.OutOrStdout(), cmd.ErrOrStderr(), stdlib, jsonOutput, showValues)
+  cascade tree --values
+  cascade tree PATH
+  cascade tree PATH GOPATH DATABASE_URL`,
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTree(cmd.OutOrStdout(), cmd.ErrOrStderr(), args, stdlib, jsonOutput, showValues)
 		},
 	}
 
@@ -72,8 +78,8 @@ For allowed files, shows which environment variables are set or modified.`,
 	return cmd
 }
 
-func runTree(stdout, stderr io.Writer, stdlib string, jsonOutput, showValues bool) error {
-	output, err := gatherTree(stderr, stdlib, showValues)
+func runTree(stdout, stderr io.Writer, filterVars []string, stdlib string, jsonOutput, showValues bool) error {
+	output, err := gatherTree(stderr, filterVars, stdlib, showValues)
 	if err != nil {
 		return err
 	}
@@ -82,10 +88,10 @@ func runTree(stdout, stderr io.Writer, stdlib string, jsonOutput, showValues boo
 		return outputTreeJSON(stdout, output)
 	}
 
-	return outputTreeHuman(stdout, output, showValues)
+	return outputTreeHuman(stdout, output, filterVars, showValues)
 }
 
-func gatherTree(stderr io.Writer, stdlib string, showValues bool) (*TreeOutput, error) {
+func gatherTree(stderr io.Writer, filterVars []string, stdlib string, showValues bool) (*TreeOutput, error) {
 	// Get cascade root for chain traversal (from config or default to home)
 	root, err := cfg.GetCascadeRoot()
 	if err != nil {
@@ -150,9 +156,20 @@ func gatherTree(stderr io.Writer, stdlib string, showValues bool) (*TreeOutput, 
 
 	// Evaluate allowed RCs to track variable changes
 	if len(allowedRCs) > 0 {
-		if err := evaluateVariables(stderr, stdlib, allowedRCs, output, levelIndices, showValues); err != nil {
+		finalEnv, err := evaluateVariables(stderr, stdlib, allowedRCs, output, levelIndices, filterVars, showValues)
+		if err != nil {
 			// Log warning but don't fail the command
 			fmt.Fprintf(stderr, "cascade: warning: error evaluating variables: %v\n", err)
+		}
+
+		// If filtering, capture final values for the filtered variables
+		if len(filterVars) > 0 && finalEnv != nil {
+			output.FinalValues = make(map[string]string)
+			for _, varName := range filterVars {
+				if val, ok := finalEnv[varName]; ok {
+					output.FinalValues[varName] = val
+				}
+			}
 		}
 	}
 
@@ -160,17 +177,18 @@ func gatherTree(stderr io.Writer, stdlib string, showValues bool) (*TreeOutput, 
 }
 
 // evaluateVariables evaluates each allowed RC and tracks variable changes.
-func evaluateVariables(stderr io.Writer, stdlib string, allowedRCs []*envrc.RC, output *TreeOutput, levelIndices map[string]int, showValues bool) error {
+// Returns the final environment after all evaluations (for final value summary).
+func evaluateVariables(stderr io.Writer, stdlib string, allowedRCs []*envrc.RC, output *TreeOutput, levelIndices map[string]int, filterVars []string, showValues bool) (env.Env, error) {
 	// Get self path for evaluator
 	selfPath, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("get executable path: %w", err)
+		return nil, fmt.Errorf("get executable path: %w", err)
 	}
 
 	// Create evaluator
 	evaluator, err := eval.New("", stdlib, selfPath)
 	if err != nil {
-		return fmt.Errorf("create evaluator: %w", err)
+		return nil, fmt.Errorf("create evaluator: %w", err)
 	}
 
 	// Start with current environment (filtered)
@@ -190,6 +208,9 @@ func evaluateVariables(stderr io.Writer, stdlib string, allowedRCs []*envrc.RC, 
 		// Find variable changes
 		vars := detectVariableChanges(prevEnv, result.Env, showValues)
 
+		// Apply filter if specified
+		vars = filterVariables(vars, filterVars)
+
 		// Update the corresponding level
 		if idx, ok := levelIndices[rc.Path]; ok {
 			output.Levels[idx].Variables = vars
@@ -198,7 +219,7 @@ func evaluateVariables(stderr io.Writer, stdlib string, allowedRCs []*envrc.RC, 
 		workingEnv = result.Env
 	}
 
-	return nil
+	return workingEnv, nil
 }
 
 // detectVariableChanges compares before/after environments and returns variable entries.
@@ -250,6 +271,28 @@ func detectVariableChanges(before, after env.Env, showValues bool) []VarEntry {
 	})
 
 	return entries
+}
+
+// filterVariables filters variable entries to only include specified variables.
+// If filterVars is empty, all variables are returned.
+func filterVariables(vars []VarEntry, filterVars []string) []VarEntry {
+	if len(filterVars) == 0 {
+		return vars
+	}
+
+	filterSet := make(map[string]bool, len(filterVars))
+	for _, v := range filterVars {
+		filterSet[v] = true
+	}
+
+	filtered := make([]VarEntry, 0, len(filterVars))
+	for _, v := range vars {
+		if filterSet[v.Name] {
+			filtered = append(filtered, v)
+		}
+	}
+
+	return filtered
 }
 
 // treeIsPathLikeVar returns true if the variable is typically a colon-separated path.
@@ -304,7 +347,7 @@ func outputTreeJSON(w io.Writer, output *TreeOutput) error {
 	return enc.Encode(output)
 }
 
-func outputTreeHuman(w io.Writer, output *TreeOutput, showValues bool) error {
+func outputTreeHuman(w io.Writer, output *TreeOutput, filterVars []string, showValues bool) error {
 	c := newColorizer(w)
 
 	// Get home directory for path shortening
@@ -365,6 +408,11 @@ func outputTreeHuman(w io.Writer, output *TreeOutput, showValues bool) error {
 		fmt.Fprintln(w)
 	}
 
+	// Render final value summary when filtering
+	if len(filterVars) > 0 && len(output.FinalValues) > 0 {
+		renderFinalValues(w, c, output.FinalValues, filterVars, home)
+	}
+
 	return nil
 }
 
@@ -401,6 +449,36 @@ func renderVariables(w io.Writer, c *colorizer, vars []VarEntry, showValues bool
 		} else {
 			fmt.Fprintf(w, "\u2502   %s %s %s\n", connector, c.cyan(v.Name), c.dim(actionSymbol))
 		}
+	}
+}
+
+// renderFinalValues renders the final value summary for filtered variables.
+func renderFinalValues(w io.Writer, c *colorizer, finalValues map[string]string, filterVars []string, home string) {
+	fmt.Fprintln(w, c.bold("Final values:"))
+
+	// Iterate in the order specified by filterVars for consistent output
+	for _, varName := range filterVars {
+		val, ok := finalValues[varName]
+		if !ok {
+			// Variable was not set by any .envrc
+			fmt.Fprintf(w, "  %s %s\n", c.cyan(varName), c.dim("(not set)"))
+			continue
+		}
+
+		// Shorten the value for display
+		displayValue := val
+		if treeIsPathLikeVar(varName) {
+			displayValue = shortenPathList(displayValue, home)
+		} else {
+			displayValue = shortenPath(displayValue, home)
+		}
+
+		// Truncate very long values
+		if len(displayValue) > 80 {
+			displayValue = displayValue[:77] + "..."
+		}
+
+		fmt.Fprintf(w, "  %s = %s\n", c.cyan(varName), displayValue)
 	}
 }
 
