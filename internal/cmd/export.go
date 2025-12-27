@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -193,6 +195,11 @@ func runExport(cmd *cobra.Command, sh shell.Shell, stdlib string, noCache bool) 
 	}
 	newDiff := env.BuildEnvDiff(baseEnv, workingEnv)
 
+	// Log environment variable changes if enabled
+	if cfg.LogEnvDiff {
+		logEnvDiff(stderr, newDiff, false)
+	}
+
 	// Marshal the new diff for CASCADE_DIFF
 	diffStr, err := env.Marshal(newDiff)
 	if err != nil {
@@ -257,14 +264,14 @@ func runExport(cmd *cobra.Command, sh shell.Shell, stdlib string, noCache bool) 
 func handleNoEnvrc(stdout io.Writer, stderr io.Writer, sh shell.Shell, prevDiff *env.EnvDiff, stateStore *state.Store, deniedPaths []string) error {
 	// Try CASCADE_DIFF first
 	if prevDiff != nil && !prevDiff.IsEmpty() {
-		return revertAndCleanup(stdout, sh, prevDiff, stateStore, deniedPaths)
+		return revertAndCleanup(stdout, stderr, sh, prevDiff, stateStore, deniedPaths)
 	}
 
 	// Fall back to persistent state for denied files
 	if stateStore != nil && len(deniedPaths) > 0 {
 		for _, path := range deniedPaths {
 			if savedState, err := stateStore.Load(path); err == nil && savedState != nil && savedState.Diff != nil {
-				return revertAndCleanup(stdout, sh, savedState.Diff, stateStore, deniedPaths)
+				return revertAndCleanup(stdout, stderr, sh, savedState.Diff, stateStore, deniedPaths)
 			}
 		}
 	}
@@ -279,7 +286,12 @@ func handleNoEnvrc(stdout io.Writer, stderr io.Writer, sh shell.Shell, prevDiff 
 }
 
 // revertAndCleanup reverts the diff and cleans up state files
-func revertAndCleanup(stdout io.Writer, sh shell.Shell, diff *env.EnvDiff, stateStore *state.Store, deniedPaths []string) error {
+func revertAndCleanup(stdout, stderr io.Writer, sh shell.Shell, diff *env.EnvDiff, stateStore *state.Store, deniedPaths []string) error {
+	// Log environment variable changes if enabled
+	if cfg.LogEnvDiff {
+		logEnvDiff(stderr, diff, true)
+	}
+
 	export := make(shell.ShellExport)
 
 	reversed := diff.Reverse()
@@ -307,4 +319,44 @@ func revertAndCleanup(stdout io.Writer, sh shell.Shell, diff *env.EnvDiff, state
 	}
 
 	return nil
+}
+
+// logEnvDiff logs environment variable changes to stderr.
+// Format: "cascade export: +VAR -VAR ~VAR" or "cascade unloading: ..."
+func logEnvDiff(w io.Writer, diff *env.EnvDiff, unloading bool) {
+	if diff == nil || diff.IsEmpty() {
+		return
+	}
+
+	c := newColorizer(w)
+	var parts []string
+
+	// Collect and sort keys for deterministic output
+	keys := make([]string, 0, len(diff.Next))
+	for k := range diff.Next {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		newVal := diff.Next[key]
+		oldVal := diff.Prev[key]
+
+		switch {
+		case oldVal == "" && newVal != "": // Added
+			parts = append(parts, c.green("+"+key))
+		case oldVal != "" && newVal == "": // Removed
+			parts = append(parts, c.red("-"+key))
+		default: // Changed
+			parts = append(parts, c.yellow("~"+key))
+		}
+	}
+
+	if len(parts) > 0 {
+		prefix := "cascade export:"
+		if unloading {
+			prefix = "cascade unloading:"
+		}
+		fmt.Fprintf(w, "%s %s\n", prefix, strings.Join(parts, " "))
+	}
 }
