@@ -30,8 +30,9 @@ func TestZshHook(t *testing.T) {
 		if !strings.Contains(hook, "precmd_functions") {
 			t.Error("hook should reference precmd_functions")
 		}
-		if !strings.Contains(hook, "precmd_functions=(_cascade_hook") {
-			t.Error("hook should prepend _cascade_hook to precmd_functions")
+		// Hook is appended (not prepended) so it runs after _cascade_precmd_seq
+		if !strings.Contains(hook, "precmd_functions+=(_cascade_hook)") {
+			t.Error("hook should append _cascade_hook to precmd_functions")
 		}
 	})
 
@@ -60,6 +61,23 @@ func TestZshHook(t *testing.T) {
 		}
 		if !strings.Contains(hook, "trap - SIGINT") {
 			t.Error("hook should restore SIGINT trap after eval")
+		}
+	})
+
+	t.Run("deduplicates precmd and chpwd execution", func(t *testing.T) {
+		// Sequence incrementer must be registered
+		if !strings.Contains(hook, "_cascade_precmd_seq()") {
+			t.Error("hook should define _cascade_precmd_seq function")
+		}
+		if !strings.Contains(hook, "precmd_functions=(_cascade_precmd_seq") {
+			t.Error("hook should prepend _cascade_precmd_seq to precmd_functions")
+		}
+		// Guard check must be present in _cascade_hook
+		if !strings.Contains(hook, `[[ "$_cascade_last_run" == "$_cascade_prompt_seq" ]] && return`) {
+			t.Error("hook should skip if already ran this prompt cycle")
+		}
+		if !strings.Contains(hook, "_cascade_last_run=$_cascade_prompt_seq") {
+			t.Error("hook should record when it ran")
 		}
 	})
 }

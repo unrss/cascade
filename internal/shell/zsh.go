@@ -15,16 +15,35 @@ var Zsh Shell = &zshShell{}
 
 // zshHookTemplate is the template for the zsh hook.
 // It uses precmd_functions and chpwd_functions arrays to run the hook
-// before each prompt and on directory change. The hook traps SIGINT
-// during eval to prevent interruption of environment updates.
-const zshHookTemplate = `_cascade_hook() {
+// before each prompt and on directory change.
+//
+// Deduplication: Both chpwd and precmd fire when the user runs `cd`, which
+// would cause the hook to run twice per prompt. We use a prompt sequence
+// counter (_cascade_prompt_seq) that increments before each prompt via
+// _cascade_precmd_seq. The hook checks if it already ran this cycle by
+// comparing _cascade_last_run to the current sequence, skipping if equal.
+// This ensures the hook runs exactly once per prompt, regardless of whether
+// chpwd triggered it first.
+//
+// The hook traps SIGINT during eval to prevent interruption of environment
+// updates.
+const zshHookTemplate = `_cascade_precmd_seq() { (( ++_cascade_prompt_seq )) }
+
+_cascade_hook() {
+  [[ "$_cascade_last_run" == "$_cascade_prompt_seq" ]] && return
+  _cascade_last_run=$_cascade_prompt_seq
+
   trap -- '' SIGINT
   eval "$("{{.SelfPath}}" export zsh)"
   trap - SIGINT
 }
+
 typeset -ag precmd_functions
+if (( ! ${precmd_functions[(I)_cascade_precmd_seq]} )); then
+  precmd_functions=(_cascade_precmd_seq $precmd_functions)
+fi
 if (( ! ${precmd_functions[(I)_cascade_hook]} )); then
-  precmd_functions=(_cascade_hook $precmd_functions)
+  precmd_functions+=(_cascade_hook)
 fi
 typeset -ag chpwd_functions
 if (( ! ${chpwd_functions[(I)_cascade_hook]} )); then
