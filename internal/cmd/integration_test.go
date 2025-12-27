@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1173,4 +1174,359 @@ func TestIntegration_StateRecovery_ChainWithMixedStatus(t *testing.T) {
 	// Both VAR1 and VAR2 should be unset (reverted from CASCADE_DIFF)
 	assertExportUnsets(t, exports, "VAR1")
 	assertExportUnsets(t, exports, "VAR2")
+}
+
+// TestIntegration_TreeCommand tests the tree command basic output.
+func TestIntegration_TreeCommand(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	env := setupTestEnv(t)
+
+	// Create .envrc chain
+	workDir := filepath.Join(env.homeDir, "work")
+	env.createEnvrc(env.homeDir, `export HOME_VAR="from_home"`)
+	env.createEnvrc(workDir, `export WORK_VAR="from_work"`)
+
+	// Allow home, leave work not allowed
+	if err := env.runAllow(filepath.Join(env.homeDir, ".envrc")); err != nil {
+		t.Fatalf("allow home: %v", err)
+	}
+
+	// Run tree from work directory
+	workEnv := env.withWorkDir(workDir)
+	stdout, _, err := workEnv.run("tree")
+	if err != nil {
+		t.Fatalf("tree: %v", err)
+	}
+
+	// Should show both .envrc files
+	if !strings.Contains(stdout, ".envrc") {
+		t.Error("tree output missing .envrc files")
+	}
+
+	// Should show allowed status for home
+	if !strings.Contains(stdout, "allowed") {
+		t.Error("tree output missing 'allowed' status")
+	}
+
+	// Should show not allowed status for work
+	if !strings.Contains(stdout, "not allowed") {
+		t.Error("tree output missing 'not allowed' status")
+	}
+}
+
+// TestIntegration_TreeJSON tests the tree command JSON output.
+func TestIntegration_TreeJSON(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	env := setupTestEnv(t)
+
+	// Create .envrc chain
+	workDir := filepath.Join(env.homeDir, "work")
+	env.createEnvrc(env.homeDir, `export HOME_VAR="from_home"`)
+	env.createEnvrc(workDir, `export WORK_VAR="from_work"`)
+
+	// Allow both files
+	if err := env.runAllow(filepath.Join(env.homeDir, ".envrc")); err != nil {
+		t.Fatalf("allow home: %v", err)
+	}
+	if err := env.runAllow(filepath.Join(workDir, ".envrc")); err != nil {
+		t.Fatalf("allow work: %v", err)
+	}
+
+	// Run tree --json from work directory
+	workEnv := env.withWorkDir(workDir)
+	stdout, _, err := workEnv.run("tree", "--json")
+	if err != nil {
+		t.Fatalf("tree --json: %v", err)
+	}
+
+	// Parse JSON output
+	var result struct {
+		Root    string `json:"root"`
+		Current string `json:"current"`
+		Levels  []struct {
+			Path      string `json:"path"`
+			Dir       string `json:"dir"`
+			Exists    bool   `json:"exists"`
+			Status    string `json:"status"`
+			IsCurrent bool   `json:"is_current"`
+			Variables []struct {
+				Name   string `json:"name"`
+				Action string `json:"action"`
+				Value  string `json:"value,omitempty"`
+			} `json:"variables,omitempty"`
+		} `json:"levels"`
+	}
+
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("json.Unmarshal: %v\nstdout: %s", err, stdout)
+	}
+
+	// Verify structure
+	if result.Root != env.homeDir {
+		t.Errorf("root = %q, want %q", result.Root, env.homeDir)
+	}
+	if result.Current != workDir {
+		t.Errorf("current = %q, want %q", result.Current, workDir)
+	}
+
+	// Should have 2 levels (home and work)
+	if len(result.Levels) != 2 {
+		t.Errorf("levels count = %d, want 2", len(result.Levels))
+	}
+
+	// Verify levels
+	for _, level := range result.Levels {
+		if !level.Exists {
+			t.Errorf("level %s should exist", level.Path)
+		}
+		if level.Status != "allowed" {
+			t.Errorf("level %s status = %q, want 'allowed'", level.Path, level.Status)
+		}
+	}
+
+	// Verify variables are tracked
+	foundHomeVar := false
+	foundWorkVar := false
+	for _, level := range result.Levels {
+		for _, v := range level.Variables {
+			if v.Name == "HOME_VAR" {
+				foundHomeVar = true
+				if v.Action != "set" {
+					t.Errorf("HOME_VAR action = %q, want 'set'", v.Action)
+				}
+			}
+			if v.Name == "WORK_VAR" {
+				foundWorkVar = true
+				if v.Action != "set" {
+					t.Errorf("WORK_VAR action = %q, want 'set'", v.Action)
+				}
+			}
+		}
+	}
+	if !foundHomeVar {
+		t.Error("HOME_VAR not found in tree output")
+	}
+	if !foundWorkVar {
+		t.Error("WORK_VAR not found in tree output")
+	}
+}
+
+// TestIntegration_TreeWithValues tests the tree command with --values flag.
+func TestIntegration_TreeWithValues(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	env := setupTestEnv(t)
+
+	// Create .envrc
+	env.createEnvrc(env.homeDir, `export TEST_VAR="test_value"`)
+
+	// Allow the file
+	if err := env.runAllow(filepath.Join(env.homeDir, ".envrc")); err != nil {
+		t.Fatalf("allow: %v", err)
+	}
+
+	// Run tree --json --values
+	stdout, _, err := env.run("tree", "--json", "--values")
+	if err != nil {
+		t.Fatalf("tree --json --values: %v", err)
+	}
+
+	// Parse JSON output
+	var result struct {
+		Levels []struct {
+			Variables []struct {
+				Name  string `json:"name"`
+				Value string `json:"value,omitempty"`
+			} `json:"variables,omitempty"`
+		} `json:"levels"`
+	}
+
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	// Find TEST_VAR and verify value is present
+	found := false
+	for _, level := range result.Levels {
+		for _, v := range level.Variables {
+			if v.Name == "TEST_VAR" {
+				found = true
+				if v.Value != "test_value" {
+					t.Errorf("TEST_VAR value = %q, want 'test_value'", v.Value)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("TEST_VAR not found in tree output")
+	}
+}
+
+// TestIntegration_TreeVariableFilter tests the tree command with variable filtering.
+func TestIntegration_TreeVariableFilter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	env := setupTestEnv(t)
+
+	// Create .envrc with multiple variables
+	env.createEnvrc(env.homeDir, `export VAR_A="value_a"
+export VAR_B="value_b"
+export VAR_C="value_c"`)
+
+	// Allow the file
+	if err := env.runAllow(filepath.Join(env.homeDir, ".envrc")); err != nil {
+		t.Fatalf("allow: %v", err)
+	}
+
+	// Run tree --json with filter for VAR_A only
+	stdout, _, err := env.run("tree", "--json", "VAR_A")
+	if err != nil {
+		t.Fatalf("tree --json VAR_A: %v", err)
+	}
+
+	// Parse JSON output
+	var result struct {
+		Levels []struct {
+			Variables []struct {
+				Name string `json:"name"`
+			} `json:"variables,omitempty"`
+		} `json:"levels"`
+		FinalValues map[string]string `json:"final_values,omitempty"`
+	}
+
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	// Should only have VAR_A in variables
+	for _, level := range result.Levels {
+		for _, v := range level.Variables {
+			if v.Name != "VAR_A" {
+				t.Errorf("unexpected variable %q in filtered output", v.Name)
+			}
+		}
+	}
+
+	// Should have final_values with VAR_A
+	if result.FinalValues == nil {
+		t.Fatal("final_values is nil")
+	}
+	if val, ok := result.FinalValues["VAR_A"]; !ok {
+		t.Error("VAR_A not in final_values")
+	} else if val != "value_a" {
+		t.Errorf("final_values[VAR_A] = %q, want 'value_a'", val)
+	}
+}
+
+// TestIntegration_TreeDeniedFile tests tree output for denied files.
+func TestIntegration_TreeDeniedFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	env := setupTestEnv(t)
+
+	// Create .envrc
+	env.createEnvrc(env.homeDir, `export TEST_VAR="test_value"`)
+
+	// Deny the file
+	if err := env.runDeny(filepath.Join(env.homeDir, ".envrc")); err != nil {
+		t.Fatalf("deny: %v", err)
+	}
+
+	// Run tree
+	stdout, _, err := env.run("tree")
+	if err != nil {
+		t.Fatalf("tree: %v", err)
+	}
+
+	// Should show denied status
+	if !strings.Contains(stdout, "denied") {
+		t.Error("tree output missing 'denied' status")
+	}
+}
+
+// TestIntegration_TreeNoEnvrc tests tree output when no .envrc files exist.
+func TestIntegration_TreeNoEnvrc(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	env := setupTestEnv(t)
+
+	// Run tree without any .envrc files
+	stdout, _, err := env.run("tree")
+	if err != nil {
+		t.Fatalf("tree: %v", err)
+	}
+
+	// Should indicate no files found
+	if !strings.Contains(stdout, "No .envrc files found") {
+		t.Errorf("tree output = %q, want to contain 'No .envrc files found'", stdout)
+	}
+}
+
+// TestIntegration_TreePathPrepend tests tree detection of PATH prepend.
+func TestIntegration_TreePathPrepend(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	env := setupTestEnv(t)
+
+	// Create .envrc that prepends to PATH
+	binDir := filepath.Join(env.homeDir, "bin")
+	env.createDir(binDir)
+	env.createEnvrc(env.homeDir, `PATH_add ./bin`)
+
+	// Allow the file
+	if err := env.runAllow(filepath.Join(env.homeDir, ".envrc")); err != nil {
+		t.Fatalf("allow: %v", err)
+	}
+
+	// Run tree --json
+	stdout, _, err := env.run("tree", "--json")
+	if err != nil {
+		t.Fatalf("tree --json: %v", err)
+	}
+
+	// Parse JSON output
+	var result struct {
+		Levels []struct {
+			Variables []struct {
+				Name   string `json:"name"`
+				Action string `json:"action"`
+			} `json:"variables,omitempty"`
+		} `json:"levels"`
+	}
+
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	// Find PATH and verify action is prepend
+	found := false
+	for _, level := range result.Levels {
+		for _, v := range level.Variables {
+			if v.Name == "PATH" {
+				found = true
+				if v.Action != "prepend" {
+					t.Errorf("PATH action = %q, want 'prepend'", v.Action)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("PATH not found in tree output")
+	}
 }
