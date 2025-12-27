@@ -49,6 +49,7 @@ with hierarchical inheritance across directories.`,
 		newWhichCmd(assets.Stdlib),
 		newConfigCmd(),
 		newMigrateCmd(),
+		newTreeCmd(assets.Stdlib),
 	)
 
 	return cmd
