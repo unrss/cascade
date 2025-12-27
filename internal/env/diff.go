@@ -105,6 +105,30 @@ func (d *EnvDiff) IsEmpty() bool {
 	return len(d.Next) == 0 && len(d.Prev) == 0
 }
 
+// Equal returns true if two diffs represent the same changes.
+func (d *EnvDiff) Equal(other *EnvDiff) bool {
+	if d == nil && other == nil {
+		return true
+	}
+	if d == nil || other == nil {
+		return false
+	}
+	if len(d.Next) != len(other.Next) || len(d.Prev) != len(other.Prev) {
+		return false
+	}
+	for k, v := range d.Next {
+		if other.Next[k] != v {
+			return false
+		}
+	}
+	for k, v := range d.Prev {
+		if other.Prev[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 func copyMap(m map[string]string) map[string]string {
 	if m == nil {
 		return make(map[string]string)
