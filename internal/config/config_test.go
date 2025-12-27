@@ -26,6 +26,10 @@ func TestDefault(t *testing.T) {
 	if cfg.BashPath != "" {
 		t.Errorf("BashPath should be empty, got %q", cfg.BashPath)
 	}
+
+	if !cfg.LogEnvDiff {
+		t.Error("LogEnvDiff should default to true")
+	}
 }
 
 func TestIsWhitelisted(t *testing.T) {
@@ -256,6 +260,7 @@ bash_path = "/usr/local/bin/bash"
 disabled_shells = ["fish"]
 cascade_root = "/home/user"
 cache_enabled = false
+log_env_diff = false
 `
 	configPath := filepath.Join(configDir, "config.toml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
@@ -291,6 +296,10 @@ cache_enabled = false
 	if cfg.CacheEnabled {
 		t.Error("CacheEnabled = true, want false")
 	}
+
+	if cfg.LogEnvDiff {
+		t.Error("LogEnvDiff = true, want false")
+	}
 }
 
 func TestLoad_NoConfigFile(t *testing.T) {
@@ -310,6 +319,10 @@ func TestLoad_NoConfigFile(t *testing.T) {
 	if !cfg.CacheEnabled {
 		t.Error("CacheEnabled should default to true")
 	}
+
+	if !cfg.LogEnvDiff {
+		t.Error("LogEnvDiff should default to true")
+	}
 }
 
 func TestLoad_EnvOverride(t *testing.T) {
@@ -321,6 +334,7 @@ func TestLoad_EnvOverride(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("CASCADE_CACHE_ENABLED", "false")
 	t.Setenv("CASCADE_BASH_PATH", "/custom/bash")
+	t.Setenv("CASCADE_LOG_ENV_DIFF", "false")
 
 	cfg, err := Load()
 	if err != nil {
@@ -333,5 +347,9 @@ func TestLoad_EnvOverride(t *testing.T) {
 
 	if cfg.BashPath != "/custom/bash" {
 		t.Errorf("BashPath = %q, want %q", cfg.BashPath, "/custom/bash")
+	}
+
+	if cfg.LogEnvDiff {
+		t.Error("LogEnvDiff should be false from env")
 	}
 }

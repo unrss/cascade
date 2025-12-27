@@ -26,6 +26,10 @@ type Config struct {
 
 	// CacheEnabled controls whether evaluation caching is enabled.
 	CacheEnabled bool `mapstructure:"cache_enabled"`
+
+	// LogEnvDiff controls whether to log environment variable changes to stderr.
+	// When true (default), prints +VAR/-VAR/~VAR when loading/unloading .envrc files.
+	LogEnvDiff bool `mapstructure:"log_env_diff"`
 }
 
 // Default returns a Config with default values.
@@ -36,6 +40,7 @@ func Default() *Config {
 		DisabledShells:  nil,
 		CascadeRoot:     "",
 		CacheEnabled:    true,
+		LogEnvDiff:      true,
 	}
 }
 
@@ -53,6 +58,7 @@ func Load() (*Config, error) {
 	v.SetDefault("disabled_shells", []string{})
 	v.SetDefault("cascade_root", "")
 	v.SetDefault("cache_enabled", true)
+	v.SetDefault("log_env_diff", true)
 
 	// Config file settings
 	v.SetConfigName("config")
