@@ -56,3 +56,10 @@ func (c *colorizer) dim(s string) string {
 	}
 	return s
 }
+
+func (c *colorizer) cyan(s string) string {
+	if c.enabled {
+		return "\033[36m" + s + "\033[0m"
+	}
+	return s
+}
