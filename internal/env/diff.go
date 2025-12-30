@@ -129,6 +129,27 @@ func (d *EnvDiff) Equal(other *EnvDiff) bool {
 	return true
 }
 
+// EqualEffect returns true if two diffs have the same effect (same Next values).
+// This is useful for spam prevention where we only care about what variables
+// are being set, not what they were before.
+func (d *EnvDiff) EqualEffect(other *EnvDiff) bool {
+	if d == nil && other == nil {
+		return true
+	}
+	if d == nil || other == nil {
+		return false
+	}
+	if len(d.Next) != len(other.Next) {
+		return false
+	}
+	for k, v := range d.Next {
+		if other.Next[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 func copyMap(m map[string]string) map[string]string {
 	if m == nil {
 		return make(map[string]string)

@@ -196,10 +196,12 @@ func runExport(cmd *cobra.Command, sh shell.Shell, stdlib string, noCache bool) 
 	newDiff := env.BuildEnvDiff(baseEnv, workingEnv)
 
 	// Log environment variable changes if enabled
-	// Only log when: directory changed OR diff changed (avoids spam on every prompt)
+	// Only log when: directory changed OR diff effect changed (avoids spam on every prompt)
+	// Use EqualEffect to compare only Next values - Prev values can differ between runs
+	// even when the actual effect (what variables are being set) is identical.
 	prevDir := os.Getenv("CASCADE_DIR")
 	dirChanged := prevDir != lastRC.Dir
-	diffChanged := !newDiff.Equal(prevDiff)
+	diffChanged := !newDiff.EqualEffect(prevDiff)
 	if cfg.LogEnvDiff && (dirChanged || diffChanged) {
 		logEnvDiff(stderr, newDiff, false)
 	}
