@@ -167,7 +167,7 @@ func checkDataDirectory(c *colorizer) checkResult {
 	info, err := os.Stat(cascadeDir)
 	if os.IsNotExist(err) {
 		result.status = "ok"
-		result.message = fmt.Sprintf("%s (will be created on first use)", cascadeDir)
+		result.message = cascadeDir + " (will be created on first use)"
 		return result
 	}
 	if err != nil {
@@ -178,7 +178,7 @@ func checkDataDirectory(c *colorizer) checkResult {
 
 	if !info.IsDir() {
 		result.status = "error"
-		result.message = fmt.Sprintf("%s exists but is not a directory", cascadeDir)
+		result.message = cascadeDir + " exists but is not a directory"
 		return result
 	}
 
@@ -250,7 +250,7 @@ func checkCacheDirectory(c *colorizer) checkResult {
 	info, err := os.Stat(cascadeCache)
 	if os.IsNotExist(err) {
 		result.status = "ok"
-		result.message = fmt.Sprintf("%s (will be created when needed)", cascadeCache)
+		result.message = cascadeCache + " (will be created when needed)"
 		return result
 	}
 	if err != nil {
@@ -261,7 +261,7 @@ func checkCacheDirectory(c *colorizer) checkResult {
 
 	if !info.IsDir() {
 		result.status = "error"
-		result.message = fmt.Sprintf("%s exists but is not a directory", cascadeCache)
+		result.message = cascadeCache + " exists but is not a directory"
 		return result
 	}
 
@@ -279,11 +279,12 @@ func checkCacheDirectory(c *colorizer) checkResult {
 }
 
 func checkShellHooks(c *colorizer) []checkResult {
-	var results []checkResult
+	supported := shell.Supported()
+	results := make([]checkResult, 0, len(supported))
 
 	currentShell := detectCurrentShell()
 
-	for _, shellName := range shell.Supported() {
+	for _, shellName := range supported {
 		sh := shell.Get(shellName)
 		if sh == nil {
 			continue
@@ -312,10 +313,10 @@ func checkShellHooks(c *colorizer) []checkResult {
 		if os.IsNotExist(err) {
 			if shellName == currentShell {
 				result.status = "warn"
-				result.message = fmt.Sprintf("%s does not exist", rcPath)
+				result.message = rcPath + " does not exist"
 			} else {
 				result.status = "skip"
-				result.message = fmt.Sprintf("%s does not exist", rcPath)
+				result.message = rcPath + " does not exist"
 			}
 			results = append(results, result)
 			continue
@@ -344,14 +345,14 @@ func checkShellHooks(c *colorizer) []checkResult {
 
 		if hasHook {
 			result.status = "ok"
-			result.message = fmt.Sprintf("hook found in %s", rcPath)
+			result.message = "hook found in " + rcPath
 		} else if shellName == currentShell {
 			result.status = "warn"
-			result.message = fmt.Sprintf("hook not found in %s", rcPath)
-			result.detail = fmt.Sprintf("Add to %s: eval \"$(cascade hook %s)\"", rcPath, shellName)
+			result.message = "hook not found in " + rcPath
+			result.detail = "Add to " + rcPath + ": eval \"$(cascade hook " + shellName + ")\""
 		} else {
 			result.status = "skip"
-			result.message = fmt.Sprintf("hook not found in %s (not current shell)", rcPath)
+			result.message = "hook not found in " + rcPath + " (not current shell)"
 		}
 
 		results = append(results, result)
@@ -373,13 +374,13 @@ func checkCascadeRoot(c *colorizer) checkResult {
 	info, err := os.Stat(root)
 	if err != nil {
 		result.status = "error"
-		result.message = fmt.Sprintf("cascade root does not exist: %s", root)
+		result.message = "cascade root does not exist: " + root
 		return result
 	}
 
 	if !info.IsDir() {
 		result.status = "error"
-		result.message = fmt.Sprintf("cascade root is not a directory: %s", root)
+		result.message = "cascade root is not a directory: " + root
 		return result
 	}
 
