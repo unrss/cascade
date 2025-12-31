@@ -50,6 +50,7 @@ with hierarchical inheritance across directories.`,
 		newConfigCmd(),
 		newMigrateCmd(),
 		newTreeCmd(assets.Stdlib),
+		newDoctorCmd(),
 	)
 
 	return cmd

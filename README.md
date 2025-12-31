@@ -69,6 +69,7 @@ cascade allow
 | `which` | Show which `.envrc` is currently active |
 | `dump` | Output the final evaluated environment |
 | `migrate` | Import direnv allow list |
+| `doctor` | Check installation for common issues |
 
 ### Tree visualization
 
