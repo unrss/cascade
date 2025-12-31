@@ -32,3 +32,6 @@ go.work.sum
 # .vscode/
 /cascade
 roadmap.archive.*.json
+
+# bv (beads viewer) local config and caches
+.bv/

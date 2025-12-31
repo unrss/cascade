@@ -35,6 +35,9 @@ archives:
       {{- .Version }}_
       {{- .Os }}_
       {{- .Arch }}
+    files:
+      - README.md
+      - LICENSE*
 
 checksum:
   name_template: "checksums.txt"
@@ -42,6 +45,7 @@ checksum:
 
 changelog:
   sort: asc
+  use: github
   filters:
     exclude:
       - "^docs:"
@@ -50,6 +54,15 @@ changelog:
       - "^chore:"
       - Merge pull request
       - Merge branch
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
 
 release:
   github:
@@ -58,12 +71,45 @@ release:
   draft: false
   prerelease: auto
   make_latest: true
-  name_template: "{{.ProjectName}} v{{.Version}}"
+  mode: replace
+  header: |
+    ## Cascade {{ .Version }}
+
+    **Homebrew Installation (Recommended):**
+    ```bash
+    brew install unrss/tap/cascade
+    cascade version  # Should output: cascade version {{ .Version }}
+    ```
+
+    **Manual Download:**
+    Download the appropriate archive below for your platform, extract it, and move the `cascade` binary to your PATH.
+
+    Note: Homebrew installation automatically handles macOS code signing. Manual downloads work without additional configuration.
+
+    ### Verifying Release Signatures
+
+    All releases are signed with [keyless Sigstore](https://www.sigstore.dev/). To verify:
+
+    ```bash
+    # Install cosign: https://docs.sigstore.dev/cosign/system_config/installation/
+    cosign verify-blob \
+      --bundle checksums.txt.bundle \
+      --certificate-identity 'https://github.com/unrss/cascade/.github/workflows/release.yml@refs/tags/{{ .Tag }}' \
+      --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+      checksums.txt
+    ```
+  footer: |
+    **Full Changelog**: https://github.com/unrss/cascade/compare/{{ .PreviousTag }}...{{ .Tag }}
+  name_template: "v{{ .Version }}"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
 
 signs:
   - cmd: cosign
     artifacts: checksum
     signature: "${artifact}.bundle"
+    output: true
     args:
       - sign-blob
       - "${artifact}"
@@ -77,3 +123,31 @@ sboms:
       - "${artifact}"
       - "--output"
       - "spdx-json=${document}"
+
+homebrew_casks:
+  - name: cascade
+    repository:
+      owner: unrss
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/unrss/cascade
+    description: "cascade workflow automation CLI for Git worktrees, Tmux, and Obsidian integration"
+    license: "Unlicense"
+
+    # CLI binaries (replaces install: block)
+    binaries:
+      - cascade
+
+    # Auto-remove macOS quarantine on install
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/cascade"]
+          end
+
+    # URL verification for brew audit
+    url:
+      verified: "github.com/unrss/cascade/"
